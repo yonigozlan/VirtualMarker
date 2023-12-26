@@ -5,7 +5,8 @@ import shutil
 
 import yaml
 from easydict import EasyDict as edict
-from tensorboardX import SummaryWriter
+
+# from tensorboardX import SummaryWriter
 
 
 def init_dirs(dir_list):
@@ -42,7 +43,8 @@ def init_experiment_dir(cur_path='.', data_path='.', experiment_name=''):
     init_dirs([cfg.output_dir, cfg.tb_dir, cfg.metric_dir, cfg.vis_dir, cfg.checkpoint_dir])
 
     # tensorboard
-    writer = SummaryWriter(cfg.tb_dir)
+    writer = None
+    # writer = SummaryWriter(cfg.tb_dir)
     return writer
 
 
