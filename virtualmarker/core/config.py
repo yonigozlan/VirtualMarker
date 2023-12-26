@@ -1,12 +1,12 @@
+import datetime
 import os
 import os.path as osp
 import shutil
 
 import yaml
 from easydict import EasyDict as edict
-import datetime
-
 from tensorboardX import SummaryWriter
+
 
 def init_dirs(dir_list):
     for dir in dir_list:
@@ -74,7 +74,7 @@ cfg.model.mesh2vm.ignore_part = ['head']
 
 cfg.model.simple3dpose = edict()
 cfg.model.simple3dpose.num_deconv_filters = [256, 256, 256]
-cfg.model.simple3dpose.backbone = 'HRNet'   
+cfg.model.simple3dpose.backbone = 'HRNet'
 cfg.model.simple3dpose.extra_norm_type = 'softmax'
 cfg.model.simple3dpose.extra_depth_dim = 64
 cfg.model.simple3dpose.alpha = 15
@@ -82,7 +82,7 @@ cfg.model.simple3dpose.alpha = 15
 cfg.model.hrnet = edict()
 cfg.model.hrnet.final_conv_kernel = 1
 cfg.model.hrnet.pretrained_layers = ['*']
-cfg.model.hrnet.pretrained = 'models/pytorch/pose_coco/pose_hrnet_w48_384x288.pth'
+cfg.model.hrnet.pretrained = 'experiment/simple3dmesh_train/baseline_mix/final.pth.tar'
 cfg.model.hrnet.stage2 = edict()
 cfg.model.hrnet.stage2.num_channels = [48, 96]
 cfg.model.hrnet.stage2.block = 'BASIC'
@@ -116,7 +116,7 @@ cfg.model.simple3dmesh.fix_network = False
 cfg.train = edict()
 cfg.train.print_freq = 10
 cfg.train.vis_freq = 1000
-cfg.train.batch_size = 64
+cfg.train.batch_size = 2
 cfg.train.shuffle = True
 cfg.train.begin_epoch = 1
 cfg.train.end_epoch = 40
@@ -137,14 +137,14 @@ cfg.train.resume_weight_path = ''
 """ Augmentation """
 cfg.aug = edict()
 cfg.aug.flip = False
-cfg.aug.rotate_factor = 0 
-cfg.aug.scale_factor = 0  
+cfg.aug.rotate_factor = 0
+cfg.aug.scale_factor = 0
 cfg.aug.color_factor = 0
 cfg.aug.occlusion = True
 
 """ Test Detail """
 cfg.test = edict()
-cfg.test.batch_size = 64
+cfg.test.batch_size = 2
 cfg.test.vis_freq = 500
 cfg.test.shuffle = False
 cfg.test.weight_path = ''

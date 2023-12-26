@@ -1,36 +1,36 @@
+import argparse
+import glob
 import os
 import os.path as osp
-import argparse
+import shutil
+import subprocess
+from collections import defaultdict
+
+import cv2
+import imageio
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.nn as nn
-import subprocess
-import glob
-from collections import defaultdict
-import imageio
-import numpy as np
-import shutil
-import cv2
-import matplotlib.pyplot as plt
-from tqdm import tqdm
+import virtualmarker.models as models
+import virtualpose.dataset as det_dataset
+import virtualpose.models as det_models
 from termcolor import colored
-from torchvision import transforms
 from torch.utils.data import DataLoader
-
-from virtualmarker.core.config import cfg, update_config, init_experiment_dir
+from torchvision import transforms
+from tqdm import tqdm
+from virtualmarker.core.config import cfg, init_experiment_dir, update_config
 from virtualmarker.dataset.demo_dataset import DemoDataset
-from virtualmarker.utils.vis import render_mesh
+from virtualmarker.utils.coord_utils import pixel2cam
 from virtualmarker.utils.funcs_utils import load_checkpoint
 from virtualmarker.utils.smpl_utils import get_smpl_faces
-from virtualmarker.utils.coord_utils import pixel2cam
-import virtualmarker.models as models
-
+from virtualmarker.utils.vis import render_mesh
 # detection module
 from virtualpose.core.config import config as det_cfg
 from virtualpose.core.config import update_config as det_update_config
+from virtualpose.dataset.images import ImagesBatch
 from virtualpose.utils.transforms import inverse_affine_transform_pts_cuda
 from virtualpose.utils.utils import load_backbone_validate
-import virtualpose.models as det_models
-import virtualpose.dataset as det_dataset
 
 
 def parse_args():
@@ -46,12 +46,12 @@ def parse_args():
 
     parser.add_argument('--input_type', default='image', choices=['image', 'video'], help='input type')
     parser.add_argument('--input_path', default='inputs/input.mp4', help='path to the input data')
-    parser.add_argument('--batch_size', type=int, default=32, help='batch size for detection and motion capture')
+    parser.add_argument('--batch_size', type=int, default=4, help='batch size for detection and motion capture')
     args = parser.parse_args()
     return args
 
 class Simple3DMeshInferencer:
-    def __init__(self, args, load_path='', writer=None, img_path_list=[], detection_all=[], max_person=-1, fps=-1):
+    def __init__(self, args=None, load_path='', writer=None, img_path_list=[], detection_all=[], max_person=-1, fps=-1, batch_size=4):
         self.args = args
         # prepare inference dataset
         demo_dataset = DemoDataset(img_path_list, detection_all)
@@ -60,7 +60,9 @@ class Simple3DMeshInferencer:
         self.img_path_list = img_path_list
         self.max_person = max_person
         self.fps = fps
-        self.demo_dataloader = DataLoader(self.demo_dataset, batch_size=min(args.batch_size, len(detection_all)), num_workers=8)
+        if args is not None:
+            batch_size = args.batch_size
+        self.demo_dataloader = DataLoader(self.demo_dataset, batch_size=min(batch_size, len(detection_all)), num_workers=8)
 
         # prepare inference model
         vm_A = demo_dataset.vm_A if hasattr(demo_dataset, "vm_A") else None
@@ -75,7 +77,7 @@ class Simple3DMeshInferencer:
                 vm_A=vm_A, \
                 selected_indices=selected_indices)
 
-        # load weight 
+        # load weight
         if load_path != '':
             print('==> Loading checkpoint')
             checkpoint = load_checkpoint(load_path, master=True)
@@ -134,6 +136,9 @@ class Simple3DMeshInferencer:
         return results
 
     def visualize(self, results):
+        if self.args is None:
+            print(colored('No args is provided, skip visualization.', 'red'))
+            return
         pred_mesh = results['pred_mesh']  # (N*T, V, 3)
         pred_root_xy_img = results['pred_root_xy_img']  # (N*T, J, 2)
         pose_root = results['pose_root']  # (N*T, 3)
@@ -159,16 +164,32 @@ class Simple3DMeshInferencer:
             focal_T = focal_l[chosen_mask]  # (N, ...)
             center_pt_T = center_pt[chosen_mask]  # (N, ...)
             pred_mesh_T_N[img_idx, :pred_mesh_T.shape[0]] = pred_mesh_T
-
+            intrinsic_matrix = torch.tensor(
+                [
+                    [focal_T[0][0], 0, center_pt_T[0][0]],
+                    [0, focal_T[0][1], center_pt_T[0][1]],
+                    [0, 0, 1],
+                ]
+            )
+            pred_vertices = pred_mesh_T[0]
+            projected_vertices = np.matmul(pred_vertices, intrinsic_matrix.cpu().detach().numpy().T)
+            projected_vertices = projected_vertices[:, :2] / projected_vertices[:, 2:]
+            projected_vertices = projected_vertices[:, :2]
+            rendered_img = img[:,:,::-1].copy()
+            for i in range(projected_vertices.shape[0]):
+                x, y = projected_vertices[i]
+                rendered_img = cv2.circle(rendered_img, (int(x), int(y)), 1, (0, 255, 0), -1)
             # render to image
-            try:
-                rgb, depth = render_mesh(ori_img_height, ori_img_width, pred_mesh_T/1000.0, self.smpl_faces, {'focal': focal_T, 'princpt': center_pt_T})
-                valid_mask = (depth > 0)[:,:,None] 
-                rendered_img = rgb * valid_mask + img[:,:,::-1] * (1-valid_mask)
-                cv2.imwrite(osp.join(cfg.vis_dir, f"{self.args.input_path.split('/')[-1][:-4]}_results_in_2d.jpg"), rendered_img.astype(np.uint8)[...,::-1])
-                videowriter.append_data(rendered_img.astype(np.uint8))
-            except:
-                videowriter.append_data(img.astype(np.uint8)[...,::-1])
+            cv2.imwrite(osp.join(cfg.vis_dir, f"{self.args.input_path.split('/')[-1][:-4]}_results_in_2d.jpg"), rendered_img.astype(np.uint8)[...,::-1])
+            videowriter.append_data(rendered_img.astype(np.uint8))
+            # try:
+            #     rgb, depth = render_mesh(ori_img_height, ori_img_width, pred_mesh_T/1000.0, self.smpl_faces, {'focal': focal_T, 'princpt': center_pt_T})
+            #     valid_mask = (depth > 0)[:,:,None]
+            #     rendered_img = rgb * valid_mask + img[:,:,::-1] * (1-valid_mask)
+            #     cv2.imwrite(osp.join(cfg.vis_dir, f"{self.args.input_path.split('/')[-1][:-4]}_results_in_2d.jpg"), rendered_img.astype(np.uint8)[...,::-1])
+            #     videowriter.append_data(rendered_img.astype(np.uint8))
+            # except:
+            #     videowriter.append_data(img.astype(np.uint8)[...,::-1])
         videowriter.close()
 
 
@@ -179,17 +200,18 @@ def output2original_scale(meta, output, vis=False):
     scale = torch.tensor((det_cfg.NETWORK.IMAGE_SIZE[0] / det_cfg.NETWORK.HEATMAP_SIZE[0], \
                         det_cfg.NETWORK.IMAGE_SIZE[1] / det_cfg.NETWORK.HEATMAP_SIZE[1]), \
                         device=bbox_batch.device, dtype=torch.float32)
-    
+
     det_results = []
     valid_frame_idx = []
     max_person = 0
     for i, img_path in enumerate(img_paths):
         if vis:
             img = cv2.imread(img_path)
-        if args.input_type == "image":
-            frame_id = 0
-        else:
-            frame_id = int(img_path.split('/')[-1][:-4])-1
+        # if args.input_type == "image":
+        #     frame_id = 0
+        # else:
+        #     frame_id = int(img_path.split('/')[-1][:-4])-1
+        frame_id = i
         trans = trans_batch[i].to(bbox_batch[i].device).float()
 
         n_person = 0
@@ -219,40 +241,56 @@ def output2original_scale(meta, output, vis=False):
             valid_frame_idx.append(frame_id)
     return det_results, max_person, valid_frame_idx
 
-def detect_all_persons(args, img_dir):
+def detect_all_persons(img_dir, args=None, bboxes=None):
 
     # prepare detection model
-    virtualpose_name = 'VirtualPose' 
+    virtualpose_name = 'VirtualPose'
     det_update_config(f'{virtualpose_name}/configs/images/images_inference.yaml')
 
     det_model = eval('det_models.multi_person_posenet.get_multi_person_pose_net')(det_cfg, is_train=False)
     with torch.no_grad():
         det_model = torch.nn.DataParallel(det_model.cuda())
+    if args is not None:
+        nb_gpu = int(args.gpus)
+        pretrained_file = osp.join(args.cur_path, f'{virtualpose_name}', det_cfg.NETWORK.PRETRAINED)
+        pretrained_file_backbone = osp.join(args.cur_path, f'{virtualpose_name}', det_cfg.NETWORK.PRETRAINED_BACKBONE)
+    else:
+        nb_gpu = 1
+        pretrained_file = osp.join("./VirtualPose", det_cfg.NETWORK.PRETRAINED)
+        pretrained_file_backbone = osp.join("./VirtualPose", det_cfg.NETWORK.PRETRAINED_BACKBONE)
 
-    pretrained_file = osp.join(args.cur_path, f'{virtualpose_name}', det_cfg.NETWORK.PRETRAINED)
     state_dict = torch.load(pretrained_file)
     new_state_dict = {k:v for k, v in state_dict.items() if 'backbone.pose_branch.' not in k}
     det_model.module.load_state_dict(new_state_dict, strict = False)
-    pretrained_file = osp.join(args.cur_path, f'{virtualpose_name}', det_cfg.NETWORK.PRETRAINED_BACKBONE)
-    det_model = load_backbone_validate(det_model, pretrained_file)
+    det_model = load_backbone_validate(det_model, pretrained_file_backbone)
 
     # prepare detection dataset
-    infer_dataset = det_dataset.images(
-        det_cfg, img_dir, focal_length=1700, 
-        transform=transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.485, 0.456, 0.406], 
-                std=[0.229, 0.224, 0.225]),
-        ]))
+    if type(img_dir) == list:
+        infer_dataset = ImagesBatch(
+            det_cfg, img_dir, focal_length=1700,
+            transform=transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225]),
+            ]))
+    else:
+        infer_dataset = det_dataset.images(
+            det_cfg, img_dir, focal_length=1700,
+            transform=transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225]),
+            ]))
 
     infer_loader = torch.utils.data.DataLoader(
         infer_dataset,
-        batch_size=det_cfg.TEST.BATCH_SIZE * int(args.gpus),
+        batch_size=det_cfg.TEST.BATCH_SIZE * nb_gpu,
         shuffle=False,
         num_workers=4,
         pin_memory=True)
-    
+
     det_model.eval()
 
     max_person = 0
@@ -262,6 +300,8 @@ def detect_all_persons(args, img_dir):
         for _, (inputs, targets_2d, weights_2d, targets_3d, meta, input_AGR) in enumerate(tqdm(infer_loader, dynamic_ncols=True)):
             _, _, output, _, _ = det_model(views=inputs, meta=meta, targets_2d=targets_2d,
                                                             weights_2d=weights_2d, targets_3d=targets_3d, input_AGR=input_AGR)
+            output["depths"] = torch.clamp(output["depths"], min=10000, max=10000)
+            output["roots_2d"] = torch.clamp(output["roots_2d"], min=100, max=100)
             det_results, n_person, valid_frame_idx = output2original_scale(meta, output)
             detection_all += det_results
             valid_frame_idx_all += valid_frame_idx
@@ -334,7 +374,7 @@ def main(args):
     img_path_list, img_dir, fps = get_image_path(args)
 
     # ############ detect all persons with estimated root depth ############
-    detection_all, max_person, valid_frame_idx_all = detect_all_persons(args, img_dir)
+    detection_all, max_person, valid_frame_idx_all = detect_all_persons(img_dir, args)
 
     # ############ prepare virtual marker model ############
     # create the model instance and load checkpoint
