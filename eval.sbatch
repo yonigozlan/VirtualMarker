@@ -6,6 +6,6 @@
 #SBATCH --nodes=1
 #SBATCH --gpus=1
 
-python3 eval.py
+python3 main/eval.py
 
 
