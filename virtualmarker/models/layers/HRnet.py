@@ -3,18 +3,15 @@ Implementation of HR Net
 code modified from: https://github.com/leoxiaobin/deep-high-resolution-net.pytorch
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
+import argparse
 import os
 from os import path as osp
-import argparse
-
-from virtualmarker.core.config import cfg, update_config, init_experiment_dir
 
 import torch
 import torch.nn as nn
+from virtualmarker.core.config import cfg, init_experiment_dir, update_config
 
 BN_MOMENTUM = 0.1
 
@@ -451,7 +448,7 @@ class HRNet(nn.Module):
         return x
 
     def init_weights(self):
-        pretrained = cfg.model.hrnet.pretrained
+        pretrained = osp.join("VirtualMarker", cfg.model.hrnet.pretrained)
         print('=> init HRNet weights from normal distribution')
         for m in self.modules():
             if isinstance(m, nn.Conv2d):

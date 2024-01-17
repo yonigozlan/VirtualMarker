@@ -47,6 +47,7 @@ def init_experiment_dir(cur_path='.', data_path='.', experiment_name=''):
     # writer = SummaryWriter(cfg.tb_dir)
     return writer
 
+cfg.data_dir = osp.join("./VirtualMarker", 'data')
 
 """ Dataset """
 cfg.dataset = edict()

@@ -1,14 +1,16 @@
 import os.path as osp
+import pickle
+
+import cv2
 import numpy as np
 import scipy.sparse as ssp
-import cv2
-import pickle
 from torch.utils.data import Dataset
 from torchvision import transforms
+from virtualmarker.core.config import cfg, init_experiment_dir, update_config
+from virtualmarker.utils.aug_utils import augm_params, get_affine_transform
+from virtualmarker.utils.coord_utils import (_box_to_center_scale, cam2pixel,
+                                             get_intrinsic_metrix, pixel2cam)
 
-from virtualmarker.core.config import cfg, update_config, init_experiment_dir
-from virtualmarker.utils.coord_utils import _box_to_center_scale, get_intrinsic_metrix, pixel2cam, cam2pixel
-from virtualmarker.utils.aug_utils import get_affine_transform, augm_params
 
 def estimate_focal_length(img_h, img_w):
     return (img_w * img_w + img_h * img_h) ** 0.5 # fov: 55 degree
@@ -16,7 +18,7 @@ def estimate_focal_length(img_h, img_w):
 
 class DemoDataset(Dataset):
     def __init__(self, img_path_list, detection_list):
-        self.input_joint_name = cfg.dataset.input_joint_set  
+        self.input_joint_name = cfg.dataset.input_joint_set
         self.detection_list = detection_list
         self.img_path_list = img_path_list
         self.transform = transforms.Compose([
@@ -45,7 +47,7 @@ class DemoDataset(Dataset):
 
             self.vm_joint_num = cfg.dataset.num_joints
             if self.vm_B is not None:
-                self.vm_joint_num = self.vm_B.shape[1]    
+                self.vm_joint_num = self.vm_B.shape[1]
             elif cfg.model.mesh2vm.vm_path != '':
                 self.vm_joint_num -= 17
 
@@ -81,8 +83,8 @@ class DemoDataset(Dataset):
         """
         det_info = self.detection_list[idx]
         img_idx = int(det_info[0])
-        img_path = self.img_path_list[img_idx]
-        img = cv2.imread(img_path, cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
+        img = self.img_path_list[img_idx]
+        # img = cv2.imread(img_path, cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
         ori_img_height, ori_img_width = img.shape[:2]
         focal = estimate_focal_length(ori_img_height, ori_img_width)
         focal_l = np.array([focal, focal])
@@ -114,7 +116,7 @@ class DemoDataset(Dataset):
             'img': img,
             'inv_trans': inv_trans.astype(np.float32),
             'intrinsic_param': intrinsic_param.astype(np.float32),
-            'root_cam': root_cam[0].astype(np.float32), 
+            'root_cam': root_cam[0].astype(np.float32),
             'depth_factor': np.array([2000]).astype(np.float32),
             'focal_l': np.array(focal_l).astype(np.float32),
             'center_pt': np.array(center_pt).astype(np.float32),
