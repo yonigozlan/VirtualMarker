@@ -83,8 +83,8 @@ class DemoDataset(Dataset):
         """
         det_info = self.detection_list[idx]
         img_idx = int(det_info[0])
-        img = self.img_path_list[img_idx]
-        # img = cv2.imread(img_path, cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
+        img_path = self.img_path_list[img_idx]
+        img = cv2.imread(img_path, cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
         ori_img_height, ori_img_width = img.shape[:2]
         focal = estimate_focal_length(ori_img_height, ori_img_width)
         focal_l = np.array([focal, focal])

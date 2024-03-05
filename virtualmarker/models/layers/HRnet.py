@@ -448,7 +448,8 @@ class HRNet(nn.Module):
         return x
 
     def init_weights(self):
-        pretrained = osp.join("VirtualMarker", cfg.model.hrnet.pretrained)
+        # pretrained = osp.join("VirtualMarker", cfg.model.hrnet.pretrained)
+        pretrained = osp.join(cfg.model.hrnet.pretrained)
         print('=> init HRNet weights from normal distribution')
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -482,5 +483,7 @@ class HRNet(nn.Module):
                 print('=> reinit final layer...')
             print('=> successfully loaded')
         elif pretrained:
+            # print current path
+            print("path", os.getcwd())
             print('=> please download pre-trained HRNet models first!')
             raise ValueError('{} is not exist!'.format(pretrained))
